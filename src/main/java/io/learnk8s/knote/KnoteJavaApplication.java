@@ -5,7 +5,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import org.apache.commons.io.IOUtils;
 import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
@@ -18,25 +17,19 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
-
-import io.minio.BucketExistsArgs;
-import io.minio.GetObjectArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.web.servlet.resource.PathResourceResolver;
 
 import jakarta.annotation.PostConstruct;
 
-import java.io.InputStream;
+import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -48,81 +41,6 @@ public class KnoteJavaApplication {
     }
 }
 
-/*
- * Repository
- */
-interface NotesRepository extends MongoRepository<Note, String> {
-
-}
-
-/*
- * Properties
- */
-@Configuration
-@ConfigurationProperties(prefix = "knote")
-class KnoteProperties {
-
-    @Value("${minio.host:localhost}")
-    private String minioHost;
-
-    @Value("${minio.bucket:image-storage}")
-    private String minioBucket;
-
-    @Value("${minio.access.key:}")
-    private String minioAccessKey;
-
-    @Value("${minio.secret.key:}")
-    private String minioSecretKey;
-
-    @Value("${minio.useSSL:false}")
-    private boolean minioUseSSL;
-
-    @Value("${minio.reconnect.enabled:false}")
-    private boolean minioReconnectEnabled;
-
-    public String getMinioHost() {
-        return minioHost;
-    }
-
-    public String getMinioBucket() {
-        return minioBucket;
-    }
-
-    public String getMinioAccessKey() {
-        return minioAccessKey;
-    }
-
-    public String getMinioSecretKey() {
-        return minioSecretKey;
-    }
-
-    public boolean isMinioUseSSL() {
-        return minioUseSSL;
-    }
-
-    public boolean isMinioReconnectEnabled() {
-        return minioReconnectEnabled;
-    }
-}
-
-/*
- * Persistant Domain Model
- */
-@Document(collection = "notes")
-@Setter
-@Getter
-@NoArgsConstructor
-@AllArgsConstructor
-class Note {
-    @Id
-    private String id;
-    private String description;
-
-    @Override
-    public String toString() {
-        return description;
-    }
-}
 
 /*
  * REST Controller
@@ -137,11 +55,10 @@ class KNoteController {
 
     private Parser parser = Parser.builder().build();
     private HtmlRenderer renderer = HtmlRenderer.builder().build();
-    private MinioClient minioClient;
 
     @PostConstruct
     public void init() throws InterruptedException {
-        initMinio();
+        
     }
 
     @GetMapping("/")
@@ -190,80 +107,74 @@ class KNoteController {
         }
     }
 
-    @GetMapping(value = "/img/{name}", produces = MediaType.IMAGE_PNG_VALUE)
-    public @ResponseBody byte[] getImageByName(@PathVariable String name) throws Exception {
-        String bucket = properties.getMinioBucket();
-        GetObjectArgs getObjectArgs = GetObjectArgs.builder()
-            .bucket(bucket)
-            .object(name)
-            .build();
-        InputStream imageStream = minioClient.getObject(getObjectArgs);
-        return IOUtils.toByteArray(imageStream);
-    }
-
     private void uploadImage(MultipartFile file, String description, Model model) throws Exception {
+        File uploadsDir = new File(properties.getUploadDir());
+        if (!uploadsDir.exists()) {
+            uploadsDir.mkdir();
+        }
         String fileId = UUID.randomUUID().toString() + "." +
                 file.getOriginalFilename().split("\\.")[1];
-        String bucketName = properties.getMinioBucket();
-        PutObjectArgs putObjectArgs = PutObjectArgs.builder()
-            .bucket(bucketName)
-            .object(fileId)
-            .stream(file.getInputStream(), file.getSize(), -1)
-            .contentType(file.getContentType())
-            .build();
-        minioClient.putObject(putObjectArgs);
+        file.transferTo(new File(properties.getUploadDir() + fileId));
         model.addAttribute("description",
-                description + " ![](/img/" + fileId + ")");
-    }
-
-    /*
-     * Connect to MinIO until succeed, this gracefully handles when MinIO Pod
-     * is started with a delay.  Create the bucket if it does not exist.
-     * 
-     */
-    private void initMinio() throws InterruptedException {
-        boolean bSuccess = false;
-        while (!bSuccess) {
-            try {
-                String bucketName = properties.getMinioBucket();
-                
-                minioClient = MinioClient.builder() // secure flag must be inferred from "http"
-                .endpoint("http://" + properties.getMinioHost() + ":9000")
-                .credentials(
-                    properties.getMinioAccessKey(),
-                    properties.getMinioSecretKey())
-                .build();
-            // Check if the bucket already exists.
-            BucketExistsArgs bucketExistsArgs = BucketExistsArgs.builder()
-                .bucket(bucketName)
-                .build();
-            boolean bExists = minioClient.bucketExists(bucketExistsArgs);
-            if (bExists) {
-                System.out.println("initMinio> Bucket already exists.");
-            } else {
-                MakeBucketArgs makeBucketArgs = MakeBucketArgs.builder()
-                    .bucket(bucketName)
-                    .build();
-                minioClient.makeBucket(makeBucketArgs);
-                System.out.println("initMinio> Created non-existant bucket: " + bucketName);
-            }
-            bSuccess = true;
-            } catch (Exception e) {
-                boolean bReconnect = properties.isMinioReconnectEnabled();
-                e.printStackTrace();
-                System.out.println("initMinio> Minio reconnect: " + bReconnect);
-                if (bReconnect) {
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException ex) {
-                        ex.printStackTrace();
-                    }
-                } else {
-                    bSuccess = true;
-                }
-            }
-        }
-        System.out.println("initMinio> Minio initialized!");
+                description + " ![](/uploads/" + fileId + ")");
     }
 }
 
+/*
+ * Persistant Domain Model
+ */
+@Document(collection = "notes")
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+class Note {
+    @Id
+    private String id;
+    private String description;
+
+    @Override
+    public String toString() {
+        return description;
+    }
+}
+
+/*
+ * Repository
+ */
+interface NotesRepository extends MongoRepository<Note, String> {
+
+}
+
+/*
+ * Properties
+ */
+@Configuration
+@ConfigurationProperties(prefix = "knote")
+class KnoteProperties {
+
+    @Value("${uploadDir:/mnt/uploads/}")
+    private String uploadDir;
+
+    public String getUploadDir() {
+        return uploadDir;
+    }
+}
+
+// required for accessing resources
+@Configuration
+class KnoteConfig implements WebMvcConfigurer {
+
+    @Autowired
+    private KnoteProperties properties;
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry
+                .addResourceHandler("/uploads/**")
+                .addResourceLocations("file:" + properties.getUploadDir())
+                .setCachePeriod(3600)
+                .resourceChain(true)
+                .addResolver(new PathResourceResolver());
+    }
+}

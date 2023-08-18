@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knote
+  namespace: knote
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knote
+  template:
+    metadata:
+      labels:
+        app: knote
+    spec:
+      containers:
+        - name: app
+          image: localhost/knote-java-pvc:3.0.0
+          imagePullPolicy: IfNotPresent
+#          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MONGO_URL
+              value: mongodb://mongo:27017/dev
+          volumeMounts:
+            - name: storage
+              mountPath: /mnt/uploads
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: knote-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knote
+  namespace: knote
+spec:
+  selector:
+    app: knote
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: knote-pvc
+  namespace: knote
+spec:
+  accessModes:
+    - ReadWriteOnce
+# for eks
+#    - ReadWriteMany
+#  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 256Mi

@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>io.learnk8s</groupId>
 	<artifactId>knote-java</artifactId>
-	<version>1.0.0</version>
+	<version>3.0.0</version>
 	<name>knote</name>
 	<description>Knote</description>
 
@@ -46,20 +46,6 @@
 			<groupId>org.commonmark</groupId>
 			<artifactId>commonmark</artifactId>
 			<version>0.20.0</version>
-		</dependency>
-
-		<!-- for scaling, minio sdk for object storage, and commons.io -->
-		<dependency>
-			<groupId>io.minio</groupId>
-			<artifactId>minio</artifactId>
-			<!-- <version>6.0.8</version> -->
-			<version>8.5.4</version>
-		</dependency>
-
-		<dependency>
-			<groupId>commons-io</groupId>
-			<artifactId>commons-io</artifactId>
-			<version>2.13.0</version>
 		</dependency>
 
 		<dependency>
