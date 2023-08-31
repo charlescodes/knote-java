@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: localhost/knote-java-pvc:3.0.0
+          image: localhost/knote-java
           imagePullPolicy: IfNotPresent
 #          imagePullPolicy: Always
           ports:

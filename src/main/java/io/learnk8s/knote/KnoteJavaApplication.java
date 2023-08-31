@@ -90,6 +90,15 @@ class KNoteController {
         return "index";
     }
 
+    @PostMapping("/note/test")
+    public String saveNotes(@RequestParam String description,
+                            Model model) throws Exception {
+        description = description + ", System.currentTimeMillis()->`" + System.currentTimeMillis() + "'";
+        saveNote(description, model);
+        getAllNotes(model);
+        return "redirect:/";
+    }
+
     private void getAllNotes(Model model) {
         List<Note> notes = notesRepository.findAll();
         Collections.reverse(notes);
